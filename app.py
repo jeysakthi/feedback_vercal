@@ -174,6 +174,7 @@ async def get_feedback():
     return {"feedback": feedback_list}
 
 
+
 @app.get("/feedback/session/{session_id}")
 async def get_feedback_by_session(session_id: str):
     print(f"✅ Fetching feedback for session_id: {session_id}")
@@ -183,6 +184,13 @@ async def get_feedback_by_session(session_id: str):
     rows = cur.fetchall()
     cur.close()
     conn.close()
+
+    if not rows:
+        print(f"❌ No feedback found for session_id: {session_id}")
+        return {
+            "status": "error",
+            "message": f"No feedback submitted for session ID: {session_id}"
+        }
 
     feedback_list = []
     for row in rows:
@@ -201,7 +209,11 @@ async def get_feedback_by_session(session_id: str):
         })
 
     print(f"✅ Returning feedback for session_id {session_id}: {feedback_list}")
-    return {"feedback": feedback_list}
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "feedback": feedback_list
+    }
 # ---------------------------
 # Slack Events endpoint
 # ---------------------------
