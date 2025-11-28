@@ -346,11 +346,11 @@ def update_button_message(channel, ts):
     payload = {
         "channel": channel,
         "ts": ts,
-        "text": "Thank you for your feedback! ✅",
+        "text": " ",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Thank you for your feedback! ✅"}
+                "text": {"type": "mrkdwn", "text": " "}
             }
         ]
     }
