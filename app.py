@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Request
 import uvicorn
 import hmac
@@ -8,6 +9,7 @@ import requests
 import re
 import os
 import psycopg2
+import html
 from dotenv import load_dotenv
 
 # ---------------------------
@@ -128,17 +130,10 @@ def send_slack_message(url, payload):
 # ---------------------------
 # Extraction helpers
 # ---------------------------
-import re
-import html
-
 def extract_jira_id(text):
-    # Decode HTML entities (&gt; -> >)
     clean_text = html.unescape(text)
-    # Remove markdown symbols like * and >
     clean_text = re.sub(r"[*>]", "", clean_text)
-    # Normalize spaces
     clean_text = " ".join(clean_text.split())
-    # Match JIRA ID
     match = re.search(r"JIRA ID:\s*([A-Z0-9-]+)", clean_text)
     return match.group(1).rstrip(".") if match else None
 
@@ -172,8 +167,6 @@ async def get_feedback():
         })
     print("✅ Returning formatted feedback:", feedback_list)
     return {"feedback": feedback_list}
-
-
 
 @app.get("/feedback/session/{session_id}")
 async def get_feedback_by_session(session_id: str):
@@ -214,6 +207,7 @@ async def get_feedback_by_session(session_id: str):
         "session_id": session_id,
         "feedback": feedback_list
     }
+
 # ---------------------------
 # Slack Events endpoint
 # ---------------------------
@@ -242,25 +236,24 @@ async def slack_events(request: Request):
                 session_id = extract_session_id(user_text)
                 user_feedback_state["jira_id"] = jira_id
                 user_feedback_state["session_id"] = session_id
-                user_name = get_user_name(event.get("user"))
-                print(f"✅ Extracted JIRA ID: {jira_id}, Session ID: {session_id}, User: {user_name}")
-                send_yes_button(channel_id, thread_ts, user_name)
+                print(f"✅ Extracted JIRA ID: {jira_id}, Session ID: {session_id}")
+                send_yes_button(channel_id, thread_ts)
 
     return {"status": "ok"}
 
 # ---------------------------
 # Send Yes button
 # ---------------------------
-def send_yes_button(channel, thread_ts, user_name):
+def send_yes_button(channel, thread_ts):
     url = "https://slack.com/api/chat.postMessage"
     payload = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "text": " ",
+        "text": "✅",
         "blocks": [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": " "},
+                "text": {"type": "mrkdwn", "text": "✅"},
                 "accessory": {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Click to Submit Your Feedback"},
@@ -270,8 +263,11 @@ def send_yes_button(channel, thread_ts, user_name):
             }
         ]
     }
-    print(f"✅ Sending Yes button with emoji to channel {channel}, thread {thread_ts}")
-    send_slack_message(url, payload)
+    resp = send_slack_message(url, payload)
+    button_ts = resp.get("ts")
+    if button_ts:
+        user_feedback_state["button_ts"] = button_ts
+    print(f"✅ Button message ts captured: {button_ts}")
 
 # ---------------------------
 # Send feedback form
@@ -343,6 +339,25 @@ def update_feedback_form(channel, ts, user_name):
     send_slack_message(url, payload)
 
 # ---------------------------
+# Update button message
+# ---------------------------
+def update_button_message(channel, ts):
+    url = "https://slack.com/api/chat.update"
+    payload = {
+        "channel": channel,
+        "ts": ts,
+        "text": "Thank you for your feedback! ✅",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "Thank you for your feedback! ✅"}
+            }
+        ]
+    }
+    print(f"✅ Updating button message for channel {channel}, ts {ts}")
+    send_slack_message(url, payload)
+
+# ---------------------------
 # Interactivity endpoint
 # ---------------------------
 @app.post("/slack/interactivity")
@@ -365,7 +380,6 @@ async def slack_interactivity(request: Request):
                 channel_id = data.get("channel", {}).get("id")
                 thread_ts = data.get("container", {}).get("thread_ts") or data.get("container", {}).get("message_ts")
 
-                # ✅ Prevent duplicate form display
                 if thread_ts in state.get("submitted_threads", []):
                     print("❌ User already submitted feedback for this thread.")
                     return {"text": "You have already submitted feedback for this thread. Thank you!"}
@@ -396,7 +410,6 @@ async def slack_interactivity(request: Request):
                 if not rating:
                     return {"text": "Please select a rating before submitting."}
 
-                # ✅ Mark this thread as submitted
                 state.setdefault("submitted_threads", []).append(thread_ts)
 
                 user_name = state.get("user_name") or get_user_name(user_id)
@@ -422,6 +435,10 @@ async def slack_interactivity(request: Request):
                 form_ts = state.get("form_ts")
                 if form_ts:
                     update_feedback_form(channel_id, form_ts, user_name)
+
+                button_ts = user_feedback_state.get("button_ts")
+                if button_ts:
+                    update_button_message(channel_id, button_ts)
 
                 return {"text": "Thank you for your valuable feedback!"}
 
